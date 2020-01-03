@@ -15,7 +15,7 @@ public class CamelMysqlCdcApplication extends RouteBuilder {
 
     @Override
     public void configure() throws Exception {
-        from("cdc-mysql:localhost:3306?username=root&password=password&tables=test.toto")
+        from("cdc-mysql:localhost:3306?username=root&password=&tables=ref.testa")
                 .log("${header.CDC_MYSQL_BINLOG_FILENAME} - ${header.CDC_MYSQL_BINLOG_POSITION} - " +
                         "${header.CDC_MYSQL_EVENT_TYPE} - ${header.CDC_MYSQL_EVENT_DATABASE_NAME} - ${header.CDC_MYSQL_EVENT_TABLE_NAME}")
                 .aggregate().constant(true).aggregationStrategy(new SimpleListAggregationStrategy())

@@ -3,6 +3,9 @@ package fr.bcoquard.camelmysqlcdc.component;
 import org.apache.camel.CamelContext;
 import org.apache.camel.Endpoint;
 import org.apache.camel.impl.DefaultComponent;
+import org.apache.camel.main.MainSupport;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 import java.util.HashMap;
@@ -10,6 +13,7 @@ import java.util.Map;
 
 @Component("cdc-mysql")
 public class CdcMysqlComponent extends DefaultComponent {
+    protected static final Logger LOG = LoggerFactory.getLogger(MainSupport.class);
 
     private boolean usePlaceholder = true;
 
@@ -18,6 +22,8 @@ public class CdcMysqlComponent extends DefaultComponent {
     private String datasourceSchema;
     private String datasourceUser;
     private String datasourcePassword;
+
+    private CdcMysqlEndpoint cdcMysqlEndpoint;
 
     public CdcMysqlComponent() {
     }
@@ -40,8 +46,8 @@ public class CdcMysqlComponent extends DefaultComponent {
         properties.put("url", remaining.split(":")[0]);
         properties.put("port", remaining.split(":")[1]);
         properties.put("username", getAndRemoveParameter(parameters, "username", String.class, ""));
-        properties.put("password",  getAndRemoveParameter(parameters, "password", String.class, ""));
-        properties.put("tables",  getAndRemoveParameter(parameters, "tables", String.class, ""));
+        properties.put("password", getAndRemoveParameter(parameters, "password", String.class, ""));
+        properties.put("tables", getAndRemoveParameter(parameters, "tables", String.class, ""));
 
         CdcMysqlEndpoint endpoint = new CdcMysqlEndpoint(uri, this, properties);
         return endpoint;

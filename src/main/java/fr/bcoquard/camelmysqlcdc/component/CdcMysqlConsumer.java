@@ -23,9 +23,13 @@ public class CdcMysqlConsumer extends DefaultConsumer {
     private final Set<TableDefinition> allowedTableDefinition = new HashSet<>();
     private final Map<Long, TableDefinition> tableMap = new HashMap<>();
 
+    private TreeMap<String, TreeMap<String, TreeMap<Integer, String>>> columnDefinition = null;
+
     public CdcMysqlConsumer(Endpoint endpoint, Processor processor) {
         super(endpoint, processor);
     }
+
+    protected MySQLConnection mySQLConnection;
 
     public CdcMysqlConsumer(Endpoint endpoint, Map<String, String> properties, Processor processor) {
         super(endpoint, processor);
@@ -40,7 +44,16 @@ public class CdcMysqlConsumer extends DefaultConsumer {
 
     @Override
     protected void doStart() throws Exception {
-        super.start();
+        super.doStart();
+
+        String url = properties.get("url");
+        String port = properties.get("port");
+        String username = properties.get("username");
+        String password = properties.get("password");
+        String schema = properties.get("schema");
+
+        this.mySQLConnection = new MySQLConnection(url, Integer.parseInt(port), username, password);
+
 
         if (this.binaryLogClient == null) {
             if (!properties.containsKey("schema")) {
@@ -75,6 +88,9 @@ public class CdcMysqlConsumer extends DefaultConsumer {
                 }
             });
         }
+
+        columnDefinition = mySQLConnection.queryTablesDefinition();
+
         binaryLogClient.connect();
     }
 
@@ -88,9 +104,9 @@ public class CdcMysqlConsumer extends DefaultConsumer {
             WriteRowsEventData eventData = (WriteRowsEventData) data;
             TableDefinition currentDefinition = tableMap.get(eventData.getTableId());
             if (allowedTableDefinition.contains(currentDefinition)) {
-                exchange.getIn().setHeader("CDC_MYSQL_EVENT_TYPE", "WRITE");
+                exchange.getIn().setHeader("CDC_MYSQL_EVENT_TYPE", "INSERT");
                 setCommonHeader(exchange, currentDefinition);
-                mapRows(exchange, eventData.getRows());
+                mapRows(exchange, currentDefinition, eventData.getRows(), EMessageOperationType.INSERT);
             } else {
                 LOG.debug("Event not in tracked definition, skipping it");
             }
@@ -100,7 +116,7 @@ public class CdcMysqlConsumer extends DefaultConsumer {
             if (allowedTableDefinition.contains(currentDefinition)) {
                 exchange.getIn().setHeader("CDC_MYSQL_EVENT_TYPE", "UPDATE");
                 setCommonHeader(exchange, currentDefinition);
-                mapRows(exchange, eventData.getRows());
+                mapRows(exchange, currentDefinition, eventData.getRows(), EMessageOperationType.UPDATE);
             } else {
                 LOG.debug("Event not in tracked definition, skipping it");
             }
@@ -110,7 +126,7 @@ public class CdcMysqlConsumer extends DefaultConsumer {
             if (allowedTableDefinition.contains(currentDefinition)) {
                 exchange.getIn().setHeader("CDC_MYSQL_EVENT_TYPE", "DELETE");
                 setCommonHeader(exchange, currentDefinition);
-                mapRows(exchange, eventData.getRows());
+                mapRows(exchange, currentDefinition, eventData.getRows(), EMessageOperationType.DELETE);
             } else {
                 LOG.debug("Event not in tracked definition, skipping it");
             }
@@ -127,23 +143,40 @@ public class CdcMysqlConsumer extends DefaultConsumer {
         exchange.getIn().setHeader("CDC_MYSQL_EVENT_TABLE_NAME", tableDefinition.table);
     }
 
-    private <T> void mapRows(Exchange exchange, List<T> rows) throws Exception {
-        List<Object> resultingRows = new ArrayList<>();
+    private <T> void mapRows(Exchange exchange, TableDefinition tableDefinition, List<T> rows, EMessageOperationType eMessageOperationType) throws Exception {
+        List<DMLMessage> messages = new ArrayList<>();
         for (Object row : rows) {
+            DMLMessage dmlMessage = new DMLMessage(eMessageOperationType);
+
+            MessagePayload messagePayloadOld = null;
+            MessagePayload messagePayloadNew = null;
+
             if (row instanceof Map.Entry) {
-                resultingRows.add(formatResult((Object[]) ((Map.Entry) row).getValue()));
+                messagePayloadOld = formatResult(tableDefinition.database, tableDefinition.table, (Object[]) ((Map.Entry) row).getValue());
+                messagePayloadNew = formatResult(tableDefinition.database, tableDefinition.table, (Object[]) ((Map.Entry) row).getValue());
             } else if (row instanceof Object[]) {
-                resultingRows.add(formatResult((Object[]) row));
+                if (eMessageOperationType.equals(EMessageOperationType.INSERT)) {
+                    messagePayloadNew = formatResult(tableDefinition.database, tableDefinition.table, (Object[]) row);
+                } else if (eMessageOperationType.equals(EMessageOperationType.DELETE)) {
+                    messagePayloadOld = formatResult(tableDefinition.database, tableDefinition.table, (Object[]) row);
+                } else {
+                    throw new Exception();
+                }
             } else {
                 throw new Exception();
             }
+
+            dmlMessage.addPayload(PayloadType.OLD, messagePayloadOld);
+            dmlMessage.addPayload(PayloadType.NEW, messagePayloadNew);
+
+            messages.add(dmlMessage);
         }
-        exchange.getIn().setBody(resultingRows);
+
+        exchange.getIn().setBody(messages);
     }
 
     @Override
     protected void doStop() throws Exception {
-        super.doStop();
 
         if (this.binaryLogClient != null && this.binaryLogClient.isConnected()) {
             this.binaryLogClient.disconnect();
@@ -153,11 +186,11 @@ public class CdcMysqlConsumer extends DefaultConsumer {
             LOG.info(this.binaryLogClient.getBinlogFilename() + "-" + this.binaryLogClient.getBinlogPosition());
         }
         LOG.info("Cdc Mysql Disconnected");
+        super.doStop();
     }
 
     @Override
     protected void doShutdown() throws Exception {
-        super.doShutdown();
 
         if (this.binaryLogClient != null && this.binaryLogClient.isConnected()) {
             this.binaryLogClient.disconnect();
@@ -168,14 +201,18 @@ public class CdcMysqlConsumer extends DefaultConsumer {
         }
 
         LOG.info("Cdc Mysql got shutdown");
+        super.doShutdown();
     }
 
-    private List<Object> formatResult(Object[] row) {
-        List<Object> formatted = new ArrayList<>();
+    private MessagePayload formatResult(String schema, String tableName, Object[] row) {
+        MessagePayload messagePayload = new MessagePayload();
+
         for (int i = 0; i < row.length; i++) {
-            formatted.add(row[i]);
+            String column = columnDefinition.get(schema).get(tableName).get(i + 1);
+            messagePayload.addOne(column, row[i]);
         }
-        return formatted;
+
+        return messagePayload;
     }
 
     private class TableDefinition {

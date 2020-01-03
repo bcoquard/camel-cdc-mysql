@@ -5,12 +5,18 @@ import org.apache.camel.Consumer;
 import org.apache.camel.Processor;
 import org.apache.camel.Producer;
 import org.apache.camel.impl.DefaultPollingEndpoint;
+import org.apache.camel.main.MainSupport;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.Map;
 
 public class CdcMysqlEndpoint extends DefaultPollingEndpoint {
+    protected static final Logger LOG = LoggerFactory.getLogger(MainSupport.class);
 
     Map<String, String> properties;
+
+    CdcMysqlConsumer cdcMysqlConsumer = null;
 
     public CdcMysqlEndpoint() {
     }
@@ -27,7 +33,7 @@ public class CdcMysqlEndpoint extends DefaultPollingEndpoint {
 
     @Override
     public Consumer createConsumer(Processor processor) throws Exception {
-        CdcMysqlConsumer cdcMysqlConsumer = new CdcMysqlConsumer(this, properties, processor);
+        cdcMysqlConsumer = new CdcMysqlConsumer(this, properties, processor);
         return cdcMysqlConsumer;
     }
 
